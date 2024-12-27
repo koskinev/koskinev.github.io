@@ -22,7 +22,7 @@ fn find_answer() -> Option<u64> {
 
 The PRNG will not be cryptographically secure, but it will be relatively fast and good enough to be useful. The idea is to store the state of the PRNG as a static atomic value, so you can access it from anywhere and update it without needing mutable access.
 
-## The `wyrand` PRNG
+## The wyrand PRNG
 
 I'll use [`wyrand`](https://github.com/wangyi-fudan/wyhash), because it needs only 64 bits of state, making it trivial to update atomically. The algorithm is not cryptographically secure, but it passed BigCrush and PractRand, so it shouldn't be terrible. A minimal implementation of wyrand is:
 

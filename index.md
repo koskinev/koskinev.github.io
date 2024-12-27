@@ -1,6 +1,8 @@
 ---
-# Feel free to add content and custom Front Matter to this file.
-# To modify the layout, see https://jekyllrb.com/docs/themes/#overriding-theme-defaults
-
 layout: home
+title: The last hobbyist programmer
 ---
+
+## Posts
+
+- [A RNG with atomic state](atomic_rng.html), 2024-12-27
