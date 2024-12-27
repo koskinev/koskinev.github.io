@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "A RNG with atomic state"
+author: ville
 date: 2024-12-27 11:17:00 -0000
 categories: rngs rust
 ---
