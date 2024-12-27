@@ -1,11 +1,11 @@
 ---
 layout: post
-title: "Atomic integers and RNGs"
+title: "A RNG with atomic state"
 date: 2024-12-27 11:17:00 -0000
 categories: rngs rust
 ---
 
-# Atomic integers and random numbers
+# A RNG with atomic state
 
 In this post, I'll show how to implement a global PRNG you can use by just calling `random()`, like this:
 
