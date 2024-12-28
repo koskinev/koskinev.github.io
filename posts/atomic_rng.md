@@ -5,6 +5,8 @@ categories: rngs rust
 title: A RNG with atomic state
 ---
 
+{% include enable_mathjax.html %}
+
 We'll implement a standalone `random` function in Rust you can use like this:
 
 ```rust
