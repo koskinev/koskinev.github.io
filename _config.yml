@@ -1,4 +1,18 @@
+domain: koskinev.github.io
+url: https://koskinev.github.io
+title: Aimless Programming
+description: >- # ignore newlines
+  Writings about weekend programming projects
+github_username:  koskinev
+
 # Build settings
 remote_theme: jekyll/minima
 minima: 
   skin: auto
+incremental: false
+highlighter: rouge
+gist:
+  noscript: false
+kramdown:
+  math_engine: mathjax
+  syntax_highlighter: rouge
