@@ -57,7 +57,7 @@ impl WyRng {
 }
 ```
 
-It took me a while to figure how the magic number ensures that the state will iterate through all possible values before repeating, but a post about low discrepancy sequences on [demofox.org](https://blog.demofox.org/2024/05/19/a-low-discrepancy-shuffle-iterator-random-access-inversion/) and the Wikipedia article on [coprime integers](https://en.wikipedia.org/wiki/Coprime_integers) made it click. The constant $a=\text{MAGIC_ADD}$ is coprime with $2^{64}$, which means that the least common multiple of $a$ and $2^{64}$ is the product of the two, i.e. $a \cdot 2^{64}$. This means that $a \cdot x \mod 2^{64}$ will will be nonzero, unless $x$ is a multiple of $2^{64}$.
+It took me a while to figure how the magic number ensures that the state will iterate through all possible values before repeating, but a post about low discrepancy sequences on [demofox.org](https://blog.demofox.org/2024/05/19/a-low-discrepancy-shuffle-iterator-random-access-inversion/) and the Wikipedia article on [coprime integers](https://en.wikipedia.org/wiki/Coprime_integers) made it click. The constant $$a=\text{MAGIC_ADD}$$ is coprime with $$2^{64}$$, which means that the least common multiple of $$a$$ and $$2^{64}$$ is the product of the two, i.e. $$a \cdot 2^{64}$$. This means that $$a \cdot x \mod 2^{64}$$ will will be nonzero, unless $$x$$ is a multiple of $$2^{64}$$.
 
 ## Going atomic
 
@@ -77,7 +77,7 @@ So let's make the state a static.
 static STATE: AtomicU64 = {
     let seed = {
         let hasher = std::hash::RandomState::new();
-        hasher.hash_one('foo')
+        hasher.hash_one("foo")
     };
     AtomicU64::new(seed)
 };
