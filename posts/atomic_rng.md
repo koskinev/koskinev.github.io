@@ -20,7 +20,7 @@ fn find_answer() -> Option<u64> {
 }
 ```
 
-Unlike [`rand::random`](https://docs.rs/rand/latest/rand/fn.random.html) function, our version doesn't initialize a new PRNG every time you call it. Instead, it uses a single PRNG with *static* state. The idea is to store the state of the PRNG as an atomic value, so you can access it from anywhere and update it without needing mutable access.
+Unlike [`rand::random`](https://docs.rs/rand/latest/rand/fn.random.html), our version doesn't initialize a new PRNG every time you call it. Instead, it uses a single PRNG with *static* state. The idea is to store the state of the PRNG as an atomic value, so you can access it from anywhere and update it without needing mutable access.
 
 ## The wyrand PRNG
 
