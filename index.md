@@ -1,8 +1,8 @@
 ---
 layout: home
-title: The last hobbyist programmer
+title: Index
 ---
 
 ## Posts
 
-- [A RNG with atomic state](atomic_rng.html), 2024-12-27
+- [A RNG with atomic state](posts/atomic_rng.html), 2024-12-27
