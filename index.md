@@ -5,4 +5,4 @@ title: Index
 
 ## Posts
 
-- [A RNG with atomic state](posts/atomic_rng.html), 2024-12-27
+- [An RNG with atomic state](posts/atomic_rng.html), 2024-12-31
