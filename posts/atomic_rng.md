@@ -1,162 +1,154 @@
 ---
 author: ville
-date: 2024-12-27 11:17:00 +0200
+date: 2024-12-31 12:21:00 +0200
 categories: rngs rust
-title: A RNG with atomic state
+title: A Rust RNG with atomically updating state
 ---
 
 {% include enable_mathjax.html %}
 
-We'll implement a standalone `random` function in Rust you can use like this:
+Since RNGs require mutable state, and Rust enforces exclusive access to mutate data, generating random data in Rust typically requires a mutable reference to an RNG. This can be inconvenient in tests because you might need to initialize several RNGs and pass them around as arguments.
+
+I've been working on a simple PRNG that uses atomics to update its state. Only an immutable reference is needed to use the generator:
 
 ```rust
-use randy::random;
+use randy::Rng;
 
-fn find_answer() -> Option<u64> {
-    match random() {
+// Create a new RNG
+let rng = Rng::new();
+
+// A function that takes a reference to the RNG
+// 
+//        not &mut 👇!
+fn find_answer(thoughts: &Rng) -> Option<u64> {
+    match thoughts.random() {
         42 => Some(42),
         _ => None,
     }
 }
+
+assert!(find_answer(&rng).is_none());
 ```
 
-Unlike [`rand::random`](https://docs.rs/rand/latest/rand/fn.random.html), our version doesn't initialize a new PRNG every time you call it. Instead, it uses a single PRNG with *static* state. The idea is to store the state of the PRNG as an atomic value, so you can access it from anywhere and update it without needing mutable access.
+Neat, huh?
 
-## The wyrand PRNG
+## Implementation
 
-I'll use [`wyrand`](https://github.com/wangyi-fudan/wyhash), because it needs only 64 bits of state, making it trivial to update atomically. The algorithm is not cryptographically secure, but apparantely it [passed](https://github.com/lemire/testingRNG?tab=readme-ov-file#visual-summary) BigCrush and PractRand, so it shouldn't be terrible. A minimal implementation is below:
+The RNG is based on iterating its state over the [Weyl sequence](https://en.wikipedia.org/wiki/Weyl_sequence) $x_i = x_{i-1} + c \mod 2^{64}$, and hashing the previous state with [wyhash](https://github.com/wangyi-fudan/wyhash). The state is stored in an [`AtomicU64`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU64.html):
 
 ```rust
-const MAGIC_ADD: u64 = 0x_2d35_8dcc_aa6c_78a5;
-const MAGIC_XOR: u64 = 0x_8bb8_4b93_962e_acc9;
-
-fn wymix(x: u64, y: u64) -> u64 {
-    let (mut a, mut b) = x, x ^ y;
-    let r = (a as u128) * (b as u128);
-    a, b = (r as u64, (r >> 64) as u64);
-    a ^ b
-}
-
-/// A pseudorandom number generator that uses the wyrand algorithm.
-pub struct WyRng {
-    /// The current state.
-    state: u64,
-}
-
-impl WyRng {
-    /// Creates a new `WyRng` with the given seed.
-    pub fn new(seed: u64) -> Self {
-        Self { state: wymix(seed, MAGIC_XOR) }
-    }
-
-    /// Returns the next pseudorandom number from the generator.
-    pub fn u64(&mut self) -> u64 {
-        // The magic number is coprime with 2^64, so the state will 
-        // iterate through all 2^64 possible values before repeating.
-        self.state = self.state.wrapping_add(MAGIC_ADD);
-        wyhash(self.state)
-    }
+pub struct Rng {
+    /// The current state of the RNG.
+    state: AtomicU64,
 }
 ```
 
-It took me a while to figure how the magic number ensures that the state will iterate through all possible values before repeating, but a post about low discrepancy sequences on [demofox.org](https://blog.demofox.org/2024/05/19/a-low-discrepancy-shuffle-iterator-random-access-inversion/) and the Wikipedia article on [coprime integers](https://en.wikipedia.org/wiki/Coprime_integers) made it click. The constant $$a=\text{MAGIC_ADD}$$ is coprime with $$2^{64}$$, which means that the least common multiple of $$a$$ and $$2^{64}$$ is the product of the two, i.e. $$a \cdot 2^{64}$$. This means that $$a \cdot x \mod 2^{64}$$ will will be nonzero, unless $$x$$ is a multiple of $$2^{64}$$.
+And it is updated with a single `fetch_add` operation, followed by a call to `wyhash`:
 
-## Going atomic
+```rust
+impl Rng {
+    /// The increment for the Weyl sequence.
+    const INCREMENT: u64 = 0x9E3779B97F4A7FFF;
 
-I'll skip the stuff about [atomics](https://doc.rust-lang.org/nomicon/atomics.html) to keep this short. (Also, I probably should understand the topic a little better to be able to explain it.) The only thing we need to know is that since an atomic value is guaranteed to be updated in a single step, you don't need to have a mutable reference to the value to update it.
+    /// Returns the next `u64` value from the pseudorandom sequence.
+    fn u64(&self) -> u64 {
+        // Read the current state and increment it
+        let old_state = self.state.fetch_add(Self::INCREMENT, Ordering::Relaxed);
+
+        // Hash the old state to produce the next value
+        wyhash(old_state)
+    }
+    ...
+}
+
+#[inline]
+fn wyhash(value: u64) -> u64 {
+    // These constants, like the `INCREMENT` constant, are coprime to 2^64.
+    const ALPHA: u128 = 0x11F9ADBB8F8DA6FFF;
+    const BETA: u128 = 0x1E3DF208C6781EFFF;
+
+    let mut tmp = (value as u128).wrapping_mul(ALPHA);
+    tmp ^= tmp >> 64;
+    tmp = tmp.wrapping_mul(BETA);
+    ((tmp >> 64) ^ tmp) as _
+}
+```
+
+And that's it!
+
+## Quality
+
+The RNG is not cryptographically secure, but it passes [PractRand](http://pracrand.sourceforge.net/) pre0.95 at least up to 256 GB of generated data. To run the tests, you need to compile the `RNG_test` binary from PractRand source, place it at the root of this project, and execute `run_practrand.sh`. See this [post](https://www.pcg-random.org/posts/how-to-test-with-practrand.html) by Melissa O'Neill for instructions on how to compile PractRand.  
+
+## Performance
+
+There is a speed penalty for using atomics. On my machine, the throughput of the atomic RNG is about 3.7 GB/s, compared to 7.7 GB/s for a variant that uses a mutable reference. Run `cargo test bench --release -- --ignored --nocapture` to see what the performance is on your machine.
+
+## Code
+
+The minimal implementation below is just 60 lines of code. You can try it on the [Rust playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&code=use+std%3A%3Async%3A%3Aatomic%3A%3A%7BAtomicU64%2C+Ordering%7D%3B%0Ause+std%3A%3Ahash%3A%3A%7BBuildHasher%2C+RandomState%7D%3B%0A%0Apub+struct+Rng+%7B%0A++++%2F%2F%2F+The+current+state+of+the+RNG.%0A++++state%3A+AtomicU64%2C%0A%7D%0A%0A%23%5Binline%5D%0Afn+wyhash%28value%3A+u64%29+-%3E+u64+%7B%0A++++%2F%2F+These+constants%2C+like+the+%60INCREMENT%60+constant%2C+are+coprime+to+2%5E64.%0A++++const+ALPHA%3A+u128+%3D+0x11F9ADBB8F8DA6FFF%3B%0A++++const+BETA%3A+u128+%3D+0x1E3DF208C6781EFFF%3B%0A%0A++++let+mut+tmp+%3D+%28value+as+u128%29.wrapping_mul%28ALPHA%29%3B%0A++++tmp+%5E%3D+tmp+%3E%3E+64%3B%0A++++tmp+%3D+tmp.wrapping_mul%28BETA%29%3B%0A++++%28%28tmp+%3E%3E+64%29+%5E+tmp%29+as+_%0A%7D%0A%0Aimpl+Rng+%7B%0A++++%2F%2F%2F+The+increment+for+the+Weyl+sequence.%0A++++const+INCREMENT%3A+u64+%3D+0x9E3779B97F4A7FFF%3B%0A%0A++++%2F%2F%2F+Initializes+a+new+RNG.%0A++++pub+fn+new%28%29+-%3E+Self+%7B%0A++++++++let+seed+%3D+RandomState%3A%3Anew%28%29.hash_one%28%22foo%22%29%3B%0A++++++++let+state+%3D+AtomicU64%3A%3Anew%28seed%29%3B%0A++++++++Self+%7B+state+%7D%0A++++%7D%0A%0A++++%2F%2F%2F+Returns+the+next+%60u64%60+value+from+the+pseudorandom+sequence.%0A++++pub+fn+random%28%26self%29+-%3E+u64+%7B%0A++++++++%2F%2F+Read+the+current+state+and+increment+it%0A++++++++let+old_state+%3D+self.state.fetch_add%28Self%3A%3AINCREMENT%2C+Ordering%3A%3ARelaxed%29%3B%0A%0A++++++++%2F%2F+Hash+the+old+state+to+produce+the+next+value%0A++++++++wyhash%28old_state%29%0A++++%7D%0A%0A%7D%0A%0Afn+main%28%29+%7B%0A++++%2F%2F+Create+a+new+RNG%0A++++let+rng+%3D+Rng%3A%3Anew%28%29%3B%0A++++%0A++++%2F%2F+A+function+that+takes+a+reference+to+the+RNG%0A++++%2F%2F+%0A++++%2F%2F+++++++++++++not+%26mut+%F0%9F%91%87%21%0A++++fn+find_answer%28thoughts%3A+%26Rng%29+-%3E+Option%3Cu64%3E+%7B%0A++++++++let+idea+%3D+thoughts.random%28%29%3B%0A++++++++println%21%28%22Got+%7Bidea%7D%22%29%3B%0A++++++++match+idea+%7B%0A++++++++++++42+%3D%3E+Some%2842%29%2C%0A++++++++++++_+%3D%3E+None%2C%0A++++++++%7D%0A++++%7D%0A++++%0A++++assert%21%28find_answer%28%26rng%29.is_none%28%29%29%3B%0A%7D):
 
 ```rust
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::hash::{BuildHasher, RandomState};
 
-let x = AtomicU64::new(1);
-x.fetch_add(1, Ordering::Relaxed);
-print!("{}", x.load(Ordering::Relaxed));
-```
-
-So let's make the state a static.
-
-```rust
-static STATE: AtomicU64 = {
-    let seed = {
-        let hasher = std::hash::RandomState::new();
-        hasher.hash_one("foo")
-    };
-    AtomicU64::new(seed)
-};
-```
-
-Unfortunately, this fails to compile:
-
-```text
-error[E0015]: cannot call non-const fn `RandomState::new` in statics
-  --> src/main.rs:10:26
-   |
-10 |             let hasher = std::hash::RandomState::new();
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-```
-
-To work around this, we need to initialize the state lazily. We can do this by using a [`LazyLock`](https://doc.rust-lang.org/std/sync/struct.LazyLock.html), stabilized in Rust 1.80:
-
-```rust
-static STATE: LazyLock<AtomicU64> = LazyLock::new(|| {
-        #[cfg(not(debug_assertions))]
-        let seed = {
-            let hasher = std::hash::RandomState::new();
-            hasher.hash_one("foo")
-        };
-        #[cfg(debug_assertions)]
-        AtomicU64::new(1234)
-    });
-```
-
-Setting `#[cfg(debug_assertions)]` makes the state deterministic in debug builds, which is useful for testing. Now, we can implement the `random()` function:
-
-```rust
-pub fn random() -> u64 {
-    // fetch_add increments the state and returns the old value.
-    let old_state = STATE.fetch_add(MAGIC_ADD, std::sync::atomic::Ordering::Relaxed);
-    wymix(old_state.wrapping_add(MAGIC_ADD))
+pub struct Rng {
+    /// The current state of the RNG.
+    state: AtomicU64,
 }
-```
 
-This only returns `u64`s, but can be adapted to return other types. That's it!  Below is the full example code, which you can try out in the [playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&code=mod+randy+%7B%0A++++use+std%3A%3Async%3A%3A%7Batomic%3A%3A%7BAtomicU64%2C+Ordering%7D%2C+LazyLock%7D%3B%0A++++use+std%3A%3Ahash%3A%3ABuildHasher%3B%0A++++%0A++++const+MAGIC_ADD%3A+u64+%3D+0x_2d35_8dcc_aa6c_78a5%3B%0A++++const+MAGIC_XOR%3A+u64+%3D+0x_8bb8_4b93_962e_acc9%3B%0A++++%0A++++static+STATE%3A+LazyLock%3CAtomicU64%3E+%3D+LazyLock%3A%3Anew%28%7C%7C+%7B%0A++++++++let+seed+%3D+%7B%0A++++++++++++let+hasher+%3D+std%3A%3Ahash%3A%3ARandomState%3A%3Anew%28%29%3B%0A++++++++++++hasher.hash_one%28%22foo%22%29%0A++++++++%7D%3B%0A++++++++AtomicU64%3A%3Anew%28seed%29%0A++++%7D%29%3B%0A++++%0A++++fn+wymix%28x%3A+u64%2C+y%3A+u64%29+-%3E+u64+%7B%0A++++++++let+%28mut+a%2C+mut+b%29+%3D+%28x%2C+x+%5E+y%29%3B%0A++++++++let+r+%3D+%28a+as+u128%29+*+%28b+as+u128%29%3B%0A++++++++%28a%2C+b%29+%3D+%28r+as+u64%2C+%28r+%3E%3E+64%29+as+u64%29%3B%0A++++++++a+%5E+b%0A++++%7D%0A++++%0A++++%2F%2F+Returns+a+pseudorandom+%60u64%60%0A++++pub+fn+random%28%29+-%3E+u64+%7B%0A++++++++%2F%2F+Increment+the+state+and+read+the+old+value%0A++++++++let+old_state+%3D+STATE.fetch_add%28MAGIC_ADD%2C+Ordering%3A%3ARelaxed%29%3B%0A++++++++wymix%28old_state.wrapping_add%28MAGIC_ADD%29%2C+MAGIC_XOR%29%0A++++%7D%0A%7D%0A%0Afn+main%28%29+%7B%0A++++use+randy%3A%3Arandom%3B%0A%0A++++for+_+in+0..10+%7B%0A++++++++println%21%28%22%7B%7D%22%2C+random%28%29%29%3B%0A++++%7D%0A%7D):
+#[inline]
+fn wyhash(value: u64) -> u64 {
+    // These constants, like the `INCREMENT` constant, are coprime to 2^64.
+    const ALPHA: u128 = 0x11F9ADBB8F8DA6FFF;
+    const BETA: u128 = 0x1E3DF208C6781EFFF;
 
-```rust
-mod randy {
-    use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
-    use std::hash::BuildHasher;
-    
-    const MAGIC_ADD: u64 = 0x_2d35_8dcc_aa6c_78a5;
-    const MAGIC_XOR: u64 = 0x_8bb8_4b93_962e_acc9;
-    
-    static STATE: LazyLock<AtomicU64> = LazyLock::new(|| {
-        let seed = {
-            let hasher = std::hash::RandomState::new();
-            hasher.hash_one("foo")
-        };
-        AtomicU64::new(seed)
-    });
-    
-    fn wymix(x: u64, y: u64) -> u64 {
-        let (mut a, mut b) = (x, x ^ y);
-        let r = (a as u128) * (b as u128);
-        (a, b) = (r as u64, (r >> 64) as u64);
-        a ^ b
+    let mut tmp = (value as u128).wrapping_mul(ALPHA);
+    tmp ^= tmp >> 64;
+    tmp = tmp.wrapping_mul(BETA);
+    ((tmp >> 64) ^ tmp) as _
+}
+
+impl Rng {
+    /// The increment for the Weyl sequence.
+    const INCREMENT: u64 = 0x9E3779B97F4A7FFF;
+
+    /// Initializes a new RNG.
+    pub fn new() -> Self {
+        let seed = RandomState::new().hash_one("foo");
+        let state = AtomicU64::new(seed);
+        Self { state }
     }
-    
-    // Returns a pseudorandom `u64`
-    pub fn random() -> u64 {
-        // Increment the state and read the old value
-        let old_state = STATE.fetch_add(MAGIC_ADD, Ordering::Relaxed);
-        wymix(old_state.wrapping_add(MAGIC_ADD), MAGIC_XOR)
+
+    /// Returns the next `u64` value from the pseudorandom sequence.
+    pub fn random(&self) -> u64 {
+        // Read the current state and increment it
+        let old_state = self.state.fetch_add(Self::INCREMENT, Ordering::Relaxed);
+
+        // Hash the old state to produce the next value
+        wyhash(old_state)
     }
+
 }
 
 fn main() {
-    use randy::random;
-
-    for _ in 0..10 {
-        println!("{}", random());
+    // Create a new RNG
+    let rng = Rng::new();
+    
+    // A function that takes a reference to the RNG
+    // 
+    //             not &mut 👇!
+    fn find_answer(thoughts: &Rng) -> Option<u64> {
+        let idea = thoughts.random();
+        println!("Got {idea}");
+        match idea {
+            42 => Some(42),
+            _ => None,
+        }
     }
+    
+    assert!(find_answer(&rng).is_none());
 }
 ```
+
+You can also check out the full [implementation](https://github.com/koskinev/randy) on GitHub.
