@@ -7,9 +7,7 @@ title: A Rust RNG with atomically updating state
 
 {% include enable_mathjax.html %}
 
-Since RNGs require mutable state, and Rust enforces exclusive access to mutate data, generating random data in Rust typically requires a mutable reference to an RNG. This can be inconvenient in tests because you might need to initialize several RNGs and pass them around as arguments.
-
-I've been working on a simple PRNG that uses atomics to update its state. Only an immutable reference is needed to use the generator:
+I've been working on a simple PRNG that requires only an immutable reference is to use:
 
 ```rust
 use randy::Rng;
@@ -30,7 +28,13 @@ fn find_answer(thoughts: &Rng) -> Option<u64> {
 assert!(find_answer(&rng).is_none());
 ```
 
-Neat, huh?
+Neat, huh? No more passing around mutable references to the RNG! You can even make it a static, like this:
+
+```rust
+static RNG: LazyLock<Rng> = LazyLock::new(Rng::new);
+```
+
+This is possible by making the RNG's state atomic.
 
 ## Implementation
 
@@ -86,16 +90,18 @@ There is a speed penalty for using atomics. On my machine, the throughput of the
 
 ## Code
 
-The minimal implementation below is just 60 lines of code. You can try it on the [Rust playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&code=use+std%3A%3Async%3A%3Aatomic%3A%3A%7BAtomicU64%2C+Ordering%7D%3B%0Ause+std%3A%3Ahash%3A%3A%7BBuildHasher%2C+RandomState%7D%3B%0A%0Apub+struct+Rng+%7B%0A++++%2F%2F%2F+The+current+state+of+the+RNG.%0A++++state%3A+AtomicU64%2C%0A%7D%0A%0A%23%5Binline%5D%0Afn+wyhash%28value%3A+u64%29+-%3E+u64+%7B%0A++++%2F%2F+These+constants%2C+like+the+%60INCREMENT%60+constant%2C+are+coprime+to+2%5E64.%0A++++const+ALPHA%3A+u128+%3D+0x11F9ADBB8F8DA6FFF%3B%0A++++const+BETA%3A+u128+%3D+0x1E3DF208C6781EFFF%3B%0A%0A++++let+mut+tmp+%3D+%28value+as+u128%29.wrapping_mul%28ALPHA%29%3B%0A++++tmp+%5E%3D+tmp+%3E%3E+64%3B%0A++++tmp+%3D+tmp.wrapping_mul%28BETA%29%3B%0A++++%28%28tmp+%3E%3E+64%29+%5E+tmp%29+as+_%0A%7D%0A%0Aimpl+Rng+%7B%0A++++%2F%2F%2F+The+increment+for+the+Weyl+sequence.%0A++++const+INCREMENT%3A+u64+%3D+0x9E3779B97F4A7FFF%3B%0A%0A++++%2F%2F%2F+Initializes+a+new+RNG.%0A++++pub+fn+new%28%29+-%3E+Self+%7B%0A++++++++let+seed+%3D+RandomState%3A%3Anew%28%29.hash_one%28%22foo%22%29%3B%0A++++++++let+state+%3D+AtomicU64%3A%3Anew%28seed%29%3B%0A++++++++Self+%7B+state+%7D%0A++++%7D%0A%0A++++%2F%2F%2F+Returns+the+next+%60u64%60+value+from+the+pseudorandom+sequence.%0A++++pub+fn+random%28%26self%29+-%3E+u64+%7B%0A++++++++%2F%2F+Read+the+current+state+and+increment+it%0A++++++++let+old_state+%3D+self.state.fetch_add%28Self%3A%3AINCREMENT%2C+Ordering%3A%3ARelaxed%29%3B%0A%0A++++++++%2F%2F+Hash+the+old+state+to+produce+the+next+value%0A++++++++wyhash%28old_state%29%0A++++%7D%0A%0A%7D%0A%0Afn+main%28%29+%7B%0A++++%2F%2F+Create+a+new+RNG%0A++++let+rng+%3D+Rng%3A%3Anew%28%29%3B%0A++++%0A++++%2F%2F+A+function+that+takes+a+reference+to+the+RNG%0A++++%2F%2F+%0A++++%2F%2F+++++++++++++not+%26mut+%F0%9F%91%87%21%0A++++fn+find_answer%28thoughts%3A+%26Rng%29+-%3E+Option%3Cu64%3E+%7B%0A++++++++let+idea+%3D+thoughts.random%28%29%3B%0A++++++++println%21%28%22Got+%7Bidea%7D%22%29%3B%0A++++++++match+idea+%7B%0A++++++++++++42+%3D%3E+Some%2842%29%2C%0A++++++++++++_+%3D%3E+None%2C%0A++++++++%7D%0A++++%7D%0A++++%0A++++assert%21%28find_answer%28%26rng%29.is_none%28%29%29%3B%0A%7D):
+A minimal implementation below is just under 60 lines of code. You can try it on the [Rust playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&code=use+std%3A%3Async%3A%3A%7Batomic%3A%3A%7BAtomicU64%2C+Ordering%7D%2C+LazyLock%7D%3B%0Ause+std%3A%3Ahash%3A%3A%7BBuildHasher%2C+RandomState%7D%3B%0A%0Apub+struct+Rng+%7B%0A++++%2F%2F%2F+The+current+state+of+the+RNG.%0A++++state%3A+AtomicU64%2C%0A%7D%0A%0Astatic+RNG%3A+LazyLock%3CRng%3E+%3D+LazyLock%3A%3Anew%28Rng%3A%3Anew%29%3B%0A%0A%23%5Binline%5D%0Afn+wyhash%28value%3A+u64%29+-%3E+u64+%7B%0A++++%2F%2F+These+constants%2C+like+the+%60INCREMENT%60+constant%2C+are+coprime+to+2%5E64.%0A++++const+ALPHA%3A+u128+%3D+0x11F9ADBB8F8DA6FFF%3B%0A++++const+BETA%3A+u128+%3D+0x1E3DF208C6781EFFF%3B%0A%0A++++let+mut+tmp+%3D+%28value+as+u128%29.wrapping_mul%28ALPHA%29%3B%0A++++tmp+%5E%3D+tmp+%3E%3E+64%3B%0A++++tmp+%3D+tmp.wrapping_mul%28BETA%29%3B%0A++++%28%28tmp+%3E%3E+64%29+%5E+tmp%29+as+_%0A%7D%0A%0Aimpl+Rng+%7B%0A++++%2F%2F%2F+The+increment+for+the+Weyl+sequence.%0A++++const+INCREMENT%3A+u64+%3D+0x9E3779B97F4A7FFF%3B%0A%0A++++%2F%2F%2F+Initializes+a+new+RNG.%0A++++pub+fn+new%28%29+-%3E+Self+%7B%0A++++++++let+seed+%3D+RandomState%3A%3Anew%28%29.hash_one%28%22foo%22%29%3B%0A++++++++let+state+%3D+AtomicU64%3A%3Anew%28seed%29%3B%0A++++++++Self+%7B+state+%7D%0A++++%7D%0A%0A++++%2F%2F%2F+Returns+the+next+%60u64%60+value+from+the+pseudorandom+sequence.%0A++++pub+fn+random%28%26self%29+-%3E+u64+%7B%0A++++++++%2F%2F+Read+the+current+state+and+increment+it%0A++++++++let+old_state+%3D+self.state.fetch_add%28Self%3A%3AINCREMENT%2C+Ordering%3A%3ARelaxed%29%3B%0A%0A++++++++%2F%2F+Hash+the+old+state+to+produce+the+next+value%0A++++++++wyhash%28old_state%29%0A++++%7D%0A%0A%7D%0A%0Afn+main%28%29+%7B%0A++++%2F%2F+A+function+that+takes+a+reference+to+the+RNG%0A++++%2F%2F+%0A++++%2F%2F+++++++++++++not+%26mut+%F0%9F%91%87%21%0A++++fn+find_answer%28thoughts%3A+%26Rng%29+-%3E+Option%3Cu64%3E+%7B%0A++++++++let+idea+%3D+thoughts.random%28%29%3B%0A++++++++println%21%28%22Got+%7Bidea%7D%22%29%3B%0A++++++++match+idea+%7B%0A++++++++++++42+%3D%3E+Some%2842%29%2C%0A++++++++++++_+%3D%3E+None%2C%0A++++++++%7D%0A++++%7D%0A++++assert%21%28find_answer%28%26RNG%29.is_none%28%29%29%3B%0A%7D):
 
 ```rust
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{atomic::{AtomicU64, Ordering}, LazyLock};
 use std::hash::{BuildHasher, RandomState};
 
 pub struct Rng {
     /// The current state of the RNG.
     state: AtomicU64,
 }
+
+static RNG: LazyLock<Rng> = LazyLock::new(Rng::new);
 
 #[inline]
 fn wyhash(value: u64) -> u64 {
@@ -132,9 +138,6 @@ impl Rng {
 }
 
 fn main() {
-    // Create a new RNG
-    let rng = Rng::new();
-    
     // A function that takes a reference to the RNG
     // 
     //             not &mut 👇!
@@ -146,8 +149,7 @@ fn main() {
             _ => None,
         }
     }
-    
-    assert!(find_answer(&rng).is_none());
+    assert!(find_answer(&RNG).is_none());
 }
 ```
 
