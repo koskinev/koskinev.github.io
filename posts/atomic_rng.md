@@ -10,8 +10,6 @@ title: A Rust RNG with atomic state
 I've been working on a simple PRNG that requires only an immutable reference to use:
 
 ```rust
-use randy::Rng;
-
 // Create a new RNG
 let rng = Rng::new();
 
