@@ -43,7 +43,7 @@ This is possible by making the RNG's state atomic.
 
 ## Implementation
 
-The RNG iterates its state over the [Weyl sequence](https://en.wikipedia.org/wiki/Weyl_sequence) $x_i = x_{i-1} + c \mod 2^{64}$, returning the previous state hashed with [wyhash](https://github.com/wangyi-fudan/wyhash). The state is stored in a single [`AtomicU64`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU64.html) field:
+The RNG iterates its state over the [Weyl sequence](https://en.wikipedia.org/wiki/Weyl_sequence) $x_i = x_{i-1} + c \mod 2^{64}$, returning the previous state hashed with [wyhash](https://github.com/wangyi-fudan/wyhash). The state is stored as an [`AtomicU64`](https://doc.rust-lang.org/std/sync/atomic/struct.AtomicU64.html) value:
 
 ```rust
 pub struct Rng {
@@ -71,7 +71,7 @@ impl Rng {
 }
 ```
 
-The `fetch_add` call loads the current state, increments it constant, and stores the new value in a single atomic operation. The `Ordering::Relaxed` means that we don't care about the ordering of the operations, only that they are atomic. And that's it.
+The `fetch_add` call loads the current state, increments it, and stores the new value in a single atomic operation. The `Ordering::Relaxed` means that we don't care about the ordering of the operations, only that they are atomic. And that's it.
 
 ## Quality and performance
 
