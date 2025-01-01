@@ -3,7 +3,7 @@ layout: home
 title: Index
 ---
 
-This site is intented as a collection of things I find interesting enough to share. The name "joy of nih" refers to the "[not invented here]"(<https://en.wikipedia.org/wiki/Not_invented_here>) syndrome, but in a positive light. I think it's fun to reinvent simple things from scratch.
+This site is intented as a collection of things I find interesting enough to share. The name "joy of nih" refers to the [not invented here](https://en.wikipedia.org/wiki/Not_invented_here) syndrome, but in a positive light. I think it's fun to reinvent simple things from scratch.
 
 ## Posts
 
