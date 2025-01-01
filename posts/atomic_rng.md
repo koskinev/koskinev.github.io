@@ -39,7 +39,7 @@ fn think() {
 think();
 ```
 
-This is possible by making the RNG's state atomic.
+As you have probably already figured out, this is possible by making the RNG's state atomic.
 
 ## Implementation
 
